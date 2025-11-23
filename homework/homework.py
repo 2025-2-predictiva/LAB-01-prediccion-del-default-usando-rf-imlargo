@@ -92,3 +92,224 @@
 # {'type': 'cm_matrix', 'dataset': 'train', 'true_0': {"predicted_0": 15562, "predicte_1": 666}, 'true_1': {"predicted_0": 3333, "predicted_1": 1444}}
 # {'type': 'cm_matrix', 'dataset': 'test', 'true_0': {"predicted_0": 15562, "predicte_1": 650}, 'true_1': {"predicted_0": 2490, "predicted_1": 1420}}
 #
+
+import gzip
+import json
+import os
+import pickle
+
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    balanced_accuracy_score,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+)
+from sklearn.model_selection import GridSearchCV
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder
+
+
+def load_and_clean_data():
+    """
+    Paso 1: Load and clean datasets
+    - Rename 'default payment next month' to 'default'
+    - Remove 'ID' column
+    - Remove records with missing information
+    - Group EDUCATION values > 4 into 'others' category (value 4)
+    """
+    # Load datasets
+    train_df = pd.read_csv("files/input/train_default_of_credit_card_clients.csv")
+    test_df = pd.read_csv("files/input/test_default_of_credit_card_clients.csv")
+
+    # Rename target column
+    train_df = train_df.rename(columns={"default payment next month": "default"})
+    test_df = test_df.rename(columns={"default payment next month": "default"})
+
+    # Remove ID column
+    train_df = train_df.drop(columns=["ID"])
+    test_df = test_df.drop(columns=["ID"])
+
+    # Remove records with missing information (0 values in EDUCATION and MARRIAGE)
+    train_df = train_df[train_df["EDUCATION"] != 0]
+    train_df = train_df[train_df["MARRIAGE"] != 0]
+    test_df = test_df[test_df["EDUCATION"] != 0]
+    test_df = test_df[test_df["MARRIAGE"] != 0]
+
+    # Group EDUCATION values > 4 into category 4 (others)
+    train_df.loc[train_df["EDUCATION"] > 4, "EDUCATION"] = 4
+    test_df.loc[test_df["EDUCATION"] > 4, "EDUCATION"] = 4
+
+    return train_df, test_df
+
+
+def split_data(train_df, test_df):
+    """
+    Paso 2: Split datasets into X and y
+    """
+    x_train = train_df.drop(columns=["default"])
+    y_train = train_df["default"]
+    x_test = test_df.drop(columns=["default"])
+    y_test = test_df["default"]
+
+    return x_train, y_train, x_test, y_test
+
+
+def create_pipeline(x_train):
+    """
+    Paso 3: Create pipeline with OneHotEncoder and RandomForestClassifier
+    """
+    # Identify categorical columns
+    categorical_cols = ["SEX", "EDUCATION", "MARRIAGE"]
+
+    # Create column transformer for one-hot encoding
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("cat", OneHotEncoder(drop="first", sparse_output=False), categorical_cols)
+        ],
+        remainder="passthrough",
+    )
+
+    # Create pipeline
+    pipeline = Pipeline(
+        [
+            ("preprocessor", preprocessor),
+            ("classifier", RandomForestClassifier(random_state=42)),
+        ]
+    )
+
+    return pipeline
+
+
+def optimize_hyperparameters(pipeline, x_train, y_train):
+    """
+    Paso 4: Optimize hyperparameters using GridSearchCV with 10-fold CV
+    """
+    param_grid = {
+        "classifier__n_estimators": [100, 200, 300],
+        "classifier__max_depth": [10, 15, 20, None],
+        "classifier__min_samples_split": [2, 5, 10],
+        "classifier__min_samples_leaf": [1, 2, 4],
+    }
+
+    grid_search = GridSearchCV(
+        pipeline,
+        param_grid,
+        cv=10,
+        scoring="balanced_accuracy",
+        n_jobs=-1,
+        verbose=1,
+    )
+
+    grid_search.fit(x_train, y_train)
+
+    return grid_search
+
+
+def save_model(model):
+    """
+    Paso 5: Save model compressed with gzip
+    """
+    # Create models directory if it doesn't exist
+    os.makedirs("files/models", exist_ok=True)
+
+    # Save model compressed with gzip
+    with gzip.open("files/models/model.pkl.gz", "wb") as f:
+        pickle.dump(model, f)
+
+
+def calculate_and_save_metrics(model, x_train, y_train, x_test, y_test):
+    """
+    Paso 6 y 7: Calculate and save metrics and confusion matrices
+    """
+    # Create output directory if it doesn't exist
+    os.makedirs("files/output", exist_ok=True)
+
+    # Make predictions
+    y_train_pred = model.predict(x_train)
+    y_test_pred = model.predict(x_test)
+
+    # Calculate metrics for train set
+    train_metrics = {
+        "type": "metrics",
+        "dataset": "train",
+        "precision": precision_score(y_train, y_train_pred),
+        "balanced_accuracy": balanced_accuracy_score(y_train, y_train_pred),
+        "recall": recall_score(y_train, y_train_pred),
+        "f1_score": f1_score(y_train, y_train_pred),
+    }
+
+    # Calculate metrics for test set
+    test_metrics = {
+        "type": "metrics",
+        "dataset": "test",
+        "precision": precision_score(y_test, y_test_pred),
+        "balanced_accuracy": balanced_accuracy_score(y_test, y_test_pred),
+        "recall": recall_score(y_test, y_test_pred),
+        "f1_score": f1_score(y_test, y_test_pred),
+    }
+
+    # Calculate confusion matrices
+    cm_train = confusion_matrix(y_train, y_train_pred)
+    cm_test = confusion_matrix(y_test, y_test_pred)
+
+    # Format confusion matrix for train
+    train_cm = {
+        "type": "cm_matrix",
+        "dataset": "train",
+        "true_0": {"predicted_0": int(cm_train[0, 0]), "predicted_1": int(cm_train[0, 1])},
+        "true_1": {"predicted_0": int(cm_train[1, 0]), "predicted_1": int(cm_train[1, 1])},
+    }
+
+    # Format confusion matrix for test
+    test_cm = {
+        "type": "cm_matrix",
+        "dataset": "test",
+        "true_0": {"predicted_0": int(cm_test[0, 0]), "predicted_1": int(cm_test[0, 1])},
+        "true_1": {"predicted_0": int(cm_test[1, 0]), "predicted_1": int(cm_test[1, 1])},
+    }
+
+    # Save metrics to file (one JSON object per line)
+    with open("files/output/metrics.json", "w", encoding="utf-8") as f:
+        f.write(json.dumps(train_metrics) + "\n")
+        f.write(json.dumps(test_metrics) + "\n")
+        f.write(json.dumps(train_cm) + "\n")
+        f.write(json.dumps(test_cm) + "\n")
+
+
+def main():
+    """
+    Main function to execute all steps
+    """
+    # Paso 1: Load and clean data
+    print("Step 1: Loading and cleaning data...")
+    train_df, test_df = load_and_clean_data()
+
+    # Paso 2: Split data
+    print("Step 2: Splitting data...")
+    x_train, y_train, x_test, y_test = split_data(train_df, test_df)
+
+    # Paso 3: Create pipeline
+    print("Step 3: Creating pipeline...")
+    pipeline = create_pipeline(x_train)
+
+    # Paso 4: Optimize hyperparameters
+    print("Step 4: Optimizing hyperparameters...")
+    model = optimize_hyperparameters(pipeline, x_train, y_train)
+
+    # Paso 5: Save model
+    print("Step 5: Saving model...")
+    save_model(model)
+
+    # Paso 6 y 7: Calculate and save metrics
+    print("Step 6 & 7: Calculating and saving metrics...")
+    calculate_and_save_metrics(model, x_train, y_train, x_test, y_test)
+
+    print("Done! Model and metrics saved successfully.")
+
+
+if __name__ == "__main__":
+    main()

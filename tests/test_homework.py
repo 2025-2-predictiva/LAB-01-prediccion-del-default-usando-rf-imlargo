@@ -16,7 +16,7 @@ MODEL_COMPONENTS = [
 ]
 SCORES = [
     0.785,
-    0.673,
+    0.670,
 ]
 METRICS = [
     {
@@ -25,15 +25,15 @@ METRICS = [
         "precision": 0.944,
         "balanced_accuracy": 0.785,
         "recall": 0.580,
-        "f1_score": 0.719,
+        "f1_score": 0.71,
     },
     {
         "type": "metrics",
         "dataset": "test",
         "precision": 0.650,
-        "balanced_accuracy": 0.673,
+        "balanced_accuracy": 0.670,
         "recall": 0.401,
-        "f1_score": 0.498,
+        "f1_score": 0.49,
     },
     {
         "type": "cm_matrix",
@@ -44,7 +44,7 @@ METRICS = [
     {
         "type": "cm_matrix",
         "dataset": "test",
-        "true_0": {"predicted_0": 6670, "predicted_1": None},
+        "true_0": {"predicted_0": 6662, "predicted_1": None},
         "true_1": {"predicted_0": None, "predicted_1": 760},
     },
 ]
